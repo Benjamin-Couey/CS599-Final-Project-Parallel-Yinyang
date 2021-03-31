@@ -7,7 +7,7 @@
 
 
 //Example compilation
-//gcc sequential_yinyang.c -lm -o -g sequential_yinyang
+//gcc -g sequential_yinyang.c -lm -o sequential_yinyang
 
 //Example execution
 //./sequential_yinyang 10 100 90 1 MSD_year_prediction_normalize_0_1_100k.txt
@@ -25,13 +25,13 @@ int main(int argc, char **argv) {
 
   // The number of clusters, the number of points, the dimensionality of the data,
   // and the number of cluster groups respectively
-  int K, N, M, T;
+  int K, N, M, T, print_to_file;
   char fileName[500];
   double ** dataset;
   clock_t start, end;
 
-  if( argc != 6 ){
-    printf("Expected arguments K, N, M, T, and filename\n");
+  if( argc != 7 ){
+    printf("Expected arguments K, N, M, T, filename, and whether the results should be printed to file\n");
     exit(0);
   }
 
@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
   sscanf(argv[3],"%d",&M);
   sscanf(argv[4],"%d",&T);
   strcpy(fileName,argv[5]);
+  sscanf(argv[6],"%d",&print_to_file);
 
   if( K<2 || N<1 || M <1) {
     printf("K, N, or M is invalid\n");
@@ -55,6 +56,10 @@ int main(int argc, char **argv) {
   if( K > N ) {
     N = K;
     printf("N must be at least equal to K; setting N to K\n");
+  }
+
+  if( print_to_file != 0 && print_to_file != 1 ) {
+    print_to_file = 1;
   }
 
   printf("K: %d, N: %d, M: %d, T: %d\n", K, N, M, T);
@@ -137,39 +142,6 @@ int main(int argc, char **argv) {
   // Initialize the upper bounds vector which, for each point, stores the
   // distance to the clustering center that point is currently assigned to
   upper_bounds=(double*)malloc(sizeof(double)*N);
-  // Initial values will be assigned in the Kmeans algorithm below to save time
-
-  // Assign points to cluster centers using the traditional Kmeans algorithm for
-  // the first iteration
-  // For each data point in the dataset
-  int nearest_center;
-  double min_distance, distance;
-  for( int row_index=0; row_index<N; row_index++ ) {
-    // Find the closest clustering center to the point
-    min_distance = -1;
-    for( int cent_index=0; cent_index<K; cent_index++ ) {
-      distance = euclidianDistance( dataset[ row_index ], cluster_centers[ cent_index ], M );
-      if( distance < min_distance || min_distance == -1 ){
-        nearest_center = cent_index;
-        min_distance = distance;
-      }
-    }
-
-    // Add the point to that cluster
-    clusters[ row_index ] = nearest_center;
-    // Track how many points are assigned to each cluster
-    cluster_counts[ nearest_center ] = cluster_counts[ nearest_center ] + 1;
-    // Track the sum of all points assigned to each cluster
-    for( int dim_index=0; dim_index<M; dim_index++ ) {
-      cluster_sums[ nearest_center ][ dim_index ] =
-        cluster_sums[ nearest_center ][ dim_index ] + dataset[ row_index ][ dim_index ];
-    }
-    // Update that point's upper bound
-    // Technically, this is not part of the Kmeans algorithm but I'm doing this
-    // here since we just calculated the distance
-    upper_bounds[ row_index ] = min_distance;
-
-  }
 
   // Initialize the group lower bounds matrix which, for each points, stores the
   // minimum distance to clustering center the point isn't assigned to for each
@@ -177,28 +149,54 @@ int main(int argc, char **argv) {
   lower_bounds=(double**)malloc(sizeof(double*)*N);
   for( int point_index=0; point_index<N; point_index++ ) {
     lower_bounds[ point_index ]=(double*)malloc(sizeof(double)*T);
-
     for( int group_index=0; group_index<T; group_index++ ) {
       lower_bounds[ point_index ][ group_index ] = -1;
     }
+  }
+  // Initial values for both of these bounds matrices will be assigned during the
+  // the Kmeans algorithm below to save time
 
-    double local_dist, lower_bound;
-    for( int cluster_index=0; cluster_index<K; cluster_index++ ) {
-      // Don't consider the center the point is already assigned to
-      if( cluster_index != clusters[ point_index ] ) {
-        // Calculate the distance between the point and the cluster center
-        local_dist = euclidianDistance( dataset[ point_index ], cluster_centers[ cluster_index ], M );
-
-        // If this distance is lower than the current lower bound for this cluster's
-        // group, update this cluster's group's lower bound
-        lower_bound = lower_bounds[ point_index ][ cluster_groups[ cluster_index ] ];
-        if( lower_bound > local_dist || lower_bound == -1 ) {
-          lower_bounds[ point_index ][ cluster_groups[ cluster_index ] ] = local_dist;
-        }
+  // Assign points to cluster centers using the traditional Kmeans algorithm for
+  // the first iteration
+  // For each data point in the dataset
+  int nearest_center;
+  double min_distance, distance, lower_bound;
+  for( int point_index=0; point_index<N; point_index++ ) {
+    // Find the closest clustering center to the point
+    min_distance = -1;
+    for( int clust_index=0; clust_index<K; clust_index++ ) {
+      distance = euclidianDistance( dataset[ point_index ], cluster_centers[ clust_index ], M );
+      if( distance < min_distance || min_distance == -1 ){
+        nearest_center = clust_index;
+        min_distance = distance;
+      }
+      // If this distance is lower than the current lower bound for this cluster's
+      // group, update this cluster's group's lower bound
+      lower_bound = lower_bounds[ point_index ][ cluster_groups[ clust_index ] ];
+      if( lower_bound > distance || lower_bound == -1 ) {
+        lower_bounds[ point_index ][ cluster_groups[ clust_index ] ] = distance;
       }
     }
+
+    // Add the point to that cluster
+    clusters[ point_index ] = nearest_center;
+    // Track how many points are assigned to each cluster
+    cluster_counts[ nearest_center ] = cluster_counts[ nearest_center ] + 1;
+    // Track the sum of all points assigned to each cluster
+    for( int dim_index=0; dim_index<M; dim_index++ ) {
+      cluster_sums[ nearest_center ][ dim_index ] =
+        cluster_sums[ nearest_center ][ dim_index ] + dataset[ point_index ][ dim_index ];
+    }
+    // Update that point's upper bound
+    // Technically, this is not part of the Kmeans algorithm but I'm doing this
+    // here since we just calculated the distance
+    upper_bounds[ point_index ] = min_distance;
+
   }
 
+
+
+  // Start the Yinyang algorithm proper
   int iterations = 1;
   int moved_center = 1;
 
@@ -321,40 +319,51 @@ int main(int argc, char **argv) {
       // Ommiting the local test
   }
 
+  end = clock();
+  printf( "Sequential Kmeans took %f seconds\n", ((double) (end - start)) / CLOCKS_PER_SEC );
+
+
 
   //Report the clustering
-  //Report the position on the centroids and the clutering
-  FILE *file;
+  if( print_to_file == 0 ) {
+    for( int clust_index=0; clust_index<N; clust_index++ ) {
+      printf("%d ", clusters[ clust_index ] );
+    }
+    printf("\n");
+  } else {
+    //Report the position on the centroids and the clutering
+    FILE *file;
 
-  file = fopen("cluster_centers.txt", "w");
-  if (!file) {
-      printf("Unable to open file\n");
-      return(1);
-  }
-  for( int clust_index=0; clust_index<K; clust_index++ ) {
-    for( int dim_index=0; dim_index<M; dim_index++ ) {
-      if( dim_index<(M-1) ) {
-        fprintf(file, "%f, ", cluster_centers[ clust_index ][ dim_index ] );
-      } else {
-        fprintf(file, "%f\n", cluster_centers[ clust_index ][ dim_index ] );
+    file = fopen("cluster_centers.txt", "w");
+    if (!file) {
+        printf("Unable to open file\n");
+        return(1);
+    }
+    for( int clust_index=0; clust_index<K; clust_index++ ) {
+      for( int dim_index=0; dim_index<M; dim_index++ ) {
+        if( dim_index<(M-1) ) {
+          fprintf(file, "%f, ", cluster_centers[ clust_index ][ dim_index ] );
+        } else {
+          fprintf(file, "%f\n", cluster_centers[ clust_index ][ dim_index ] );
+        }
       }
     }
-  }
-  fclose(file);
+    fclose(file);
 
-  file = fopen("clustering.txt", "w");
-  if (!file) {
-      printf("Unable to open file\n");
-      return(1);
-  }
-  for( int clust_index=0; clust_index<N; clust_index++ ) {
-    if( clust_index<(N-1) ) {
-      fprintf(file, "%d, ", clusters[ clust_index ] );
-    } else {
-      fprintf(file, "%d", clusters[ clust_index ] );
+    file = fopen("clustering.txt", "w");
+    if (!file) {
+        printf("Unable to open file\n");
+        return(1);
     }
+    for( int clust_index=0; clust_index<N; clust_index++ ) {
+      if( clust_index<(N-1) ) {
+        fprintf(file, "%d, ", clusters[ clust_index ] );
+      } else {
+        fprintf(file, "%d", clusters[ clust_index ] );
+      }
+    }
+    fclose(file);
   }
-  fclose(file);
 
 
 

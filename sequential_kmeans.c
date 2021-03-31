@@ -9,7 +9,7 @@
 //gcc sequential_kmeans.c -lm -o sequential_kmeans
 
 //Example execution
-//./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt
+//./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt 0
 
 //function prototypes
 int importDataset(char * fname, int N, int M, double ** dataset);
@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
 
   // The number of clusters, the number of points, and the dimensionality of the
   // data
-  int K, N, M;
+  int K, N, M, print_to_file;
   char fileName[500];
   double ** dataset;
   clock_t start, end;
@@ -31,13 +31,18 @@ int main(int argc, char **argv) {
   sscanf(argv[2],"%d",&N);
   sscanf(argv[3],"%d",&M);
   strcpy(fileName,argv[4]);
-
-  printf("K: %d, N: %d, M: %d\n", K, N, M );
+  sscanf(argv[5],"%d",&print_to_file);
 
   if( K<2 || N<1 || M <1) {
     printf("K, N, or M is invalid\n");
     exit(0);
   }
+
+  if( print_to_file != 0 && print_to_file != 1 ) {
+    print_to_file = 1;
+  }
+
+  printf("K: %d, N: %d, M: %d\n", K, N, M );
 
   // Allocate dataset and import file into it
   dataset=(double**)malloc(sizeof(double*)*N);
@@ -156,45 +161,46 @@ int main(int argc, char **argv) {
 
 
 
-  //Report the position on the centroids and the clutering
-  FILE *file;
+  //Report the clustering
+  if( print_to_file == 0 ) {
+    for( int clust_index=0; clust_index<N; clust_index++ ) {
+      printf("%d ", clusters[ clust_index ] );
+    }
+    printf("\n");
+  } else {
+    //Report the position on the centroids and the clutering
+    FILE *file;
 
-  file = fopen("cluster_centers.txt", "w");
-  if (!file) {
-      printf("Unable to open file\n");
-      return(1);
-  }
-  for( int clust_index=0; clust_index<K; clust_index++ ) {
-    for( int dim_index=0; dim_index<M; dim_index++ ) {
-      if( dim_index<(M-1) ) {
-        fprintf(file, "%f, ", cluster_centers[ clust_index ][ dim_index ] );
-      } else {
-        fprintf(file, "%f\n", cluster_centers[ clust_index ][ dim_index ] );
+    file = fopen("cluster_centers.txt", "w");
+    if (!file) {
+        printf("Unable to open file\n");
+        return(1);
+    }
+    for( int clust_index=0; clust_index<K; clust_index++ ) {
+      for( int dim_index=0; dim_index<M; dim_index++ ) {
+        if( dim_index<(M-1) ) {
+          fprintf(file, "%f, ", cluster_centers[ clust_index ][ dim_index ] );
+        } else {
+          fprintf(file, "%f\n", cluster_centers[ clust_index ][ dim_index ] );
+        }
       }
     }
-  }
-  fclose(file);
+    fclose(file);
 
-  file = fopen("clustering.txt", "w");
-  if (!file) {
-      printf("Unable to open file\n");
-      return(1);
-  }
-  for( int clust_index=0; clust_index<N; clust_index++ ) {
-    if( clust_index<(N-1) ) {
-      fprintf(file, "%d, ", clusters[ clust_index ] );
-    } else {
-      fprintf(file, "%d", clusters[ clust_index ] );
+    file = fopen("clustering.txt", "w");
+    if (!file) {
+        printf("Unable to open file\n");
+        return(1);
     }
+    for( int clust_index=0; clust_index<N; clust_index++ ) {
+      if( clust_index<(N-1) ) {
+        fprintf(file, "%d, ", clusters[ clust_index ] );
+      } else {
+        fprintf(file, "%d", clusters[ clust_index ] );
+      }
+    }
+    fclose(file);
   }
-  fclose(file);
-
-
-
-  // for( int index=0; index<N; index++ ) {
-  //   printf( "%d ", clusters[ index ] );
-  // }
-  // printf("\n");
 
 
 
