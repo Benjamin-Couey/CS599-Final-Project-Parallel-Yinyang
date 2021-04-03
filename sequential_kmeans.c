@@ -9,7 +9,7 @@
 //gcc sequential_kmeans.c -lm -o sequential_kmeans
 
 //Example execution
-//./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt 0
+//./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt 1
 
 //function prototypes
 int importDataset(char * fname, int N, int M, double ** dataset);
