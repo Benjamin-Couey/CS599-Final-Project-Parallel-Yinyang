@@ -7,14 +7,17 @@
 
 
 //Example compilation
-//gcc -g sequential_yinyang.c -lm -o sequential_yinyang
+//gcc sequential_yinyang.c -lm -o sequential_yinyang
 
 //Example execution
-// Printing to console
+// Printing nowhere
 // ./sequential_yinyang 10 100 90 1 MSD_year_prediction_normalize_0_1_100k.txt 0
 
-// Printing to file
+// Printing to console
 // ./sequential_yinyang 10 100 90 1 MSD_year_prediction_normalize_0_1_100k.txt 1
+
+// Printing to file
+// ./sequential_yinyang 10 100 90 1 MSD_year_prediction_normalize_0_1_100k.txt 2
 
 // Testing with Valgrind
 // valgrind --track-origins=yes ./sequential_yinyang 2 10 90 1 MSD_year_prediction_normalize_0_1_100k.txt
@@ -25,6 +28,10 @@ double euclidianDistance( double * a, double * b, double dim );
 void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * clusters );
 
 #define SEED 72
+
+#define DONT_PRINT 0
+#define PRINT_CONSOLE 1
+#define PRINT_FILE 2
 
 int main(int argc, char **argv) {
 
@@ -63,8 +70,8 @@ int main(int argc, char **argv) {
     printf("N must be at least equal to K; setting N to K\n");
   }
 
-  if( print_to_file != 0 && print_to_file != 1 ) {
-    print_to_file = 1;
+  if( print_to_file != DONT_PRINT && print_to_file != PRINT_CONSOLE && print_to_file != PRINT_FILE ) {
+    print_to_file = DONT_PRINT;
   }
 
   printf("K: %d, N: %d, M: %d, T: %d\n", K, N, M, T);
@@ -311,6 +318,7 @@ int main(int argc, char **argv) {
         }
 
         // Assign the point to the best cluster found above
+        clusters[ point_index ] = nearest_center;
         cluster_counts[ nearest_center ] = cluster_counts[ nearest_center ] + 1;
         for( int dim_index=0; dim_index<M; dim_index++ ) {
           cluster_sums[ nearest_center ][ dim_index ] = cluster_sums[ nearest_center ][ dim_index ] + dataset[ point_index ][ dim_index ];
@@ -328,12 +336,13 @@ int main(int argc, char **argv) {
 
 
   //Report the clustering
-  if( print_to_file == 0 ) {
+  if( print_to_file == PRINT_CONSOLE ) {
     for( int clust_index=0; clust_index<N; clust_index++ ) {
       printf("%d ", clusters[ clust_index ] );
     }
     printf("\n");
-  } else {
+  }
+  else if( print_to_file == PRINT_FILE ) {
     //Report the position on the centroids and the clutering
     FILE *file;
 

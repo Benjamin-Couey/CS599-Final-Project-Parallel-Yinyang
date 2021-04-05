@@ -9,6 +9,8 @@
 //gcc sequential_kmeans.c -lm -o sequential_kmeans
 
 //Example execution
+//./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt 0
+
 //./sequential_kmeans 10 100 90 MSD_year_prediction_normalize_0_1_100k.txt 1
 
 //function prototypes
@@ -16,6 +18,10 @@ int importDataset(char * fname, int N, int M, double ** dataset);
 double euclidianDistance( double * a, double * b, double dim );
 
 #define SEED 72
+
+#define DONT_PRINT 0
+#define PRINT_CONSOLE 1
+#define PRINT_FILE 2
 
 int main(int argc, char **argv) {
 
@@ -38,8 +44,8 @@ int main(int argc, char **argv) {
     exit(0);
   }
 
-  if( print_to_file != 0 && print_to_file != 1 ) {
-    print_to_file = 1;
+  if( print_to_file != DONT_PRINT && print_to_file != PRINT_CONSOLE && print_to_file != PRINT_FILE ) {
+    print_to_file = DONT_PRINT;
   }
 
   printf("K: %d, N: %d, M: %d\n", K, N, M );
@@ -101,7 +107,6 @@ int main(int argc, char **argv) {
 
     iterations++;
     moved_center = 0;
-
     // Reset the data on the clusters
     for( int clust_index=0; clust_index<K; clust_index++ ) {
       cluster_counts[ clust_index ] = 0;
@@ -162,12 +167,13 @@ int main(int argc, char **argv) {
 
 
   //Report the clustering
-  if( print_to_file == 0 ) {
+  if( print_to_file == PRINT_CONSOLE ) {
     for( int clust_index=0; clust_index<N; clust_index++ ) {
       printf("%d ", clusters[ clust_index ] );
     }
     printf("\n");
-  } else {
+  }
+  else if( print_to_file == PRINT_FILE ) {
     //Report the position on the centroids and the clutering
     FILE *file;
 
