@@ -160,11 +160,10 @@ int main(int argc, char **argv) {
   double * upper_bounds;
   double ** lower_bounds;
 
-  double ** cluster_sums;
-  int * cluster_counts;
-
   double ** local_sums;
+  double ** local_means;
   int * local_counts;
+  int * global_counts;
 
   double * cluster_drift;
   double * group_drift;
@@ -194,27 +193,24 @@ int main(int argc, char **argv) {
   // center each point is associated with, onyl for the points the rank is responsible for
   clusters=(int*)malloc(sizeof(int)*points_to_calc);
 
-  // Initialize the cluster_sums matrix which stores the sum of all points in
-  // each cluster
-  cluster_sums=(double**)malloc(sizeof(double*)*K);
-  for( int clust_index=0; clust_index<K; clust_index++ ){
-    cluster_sums[ clust_index ]=(double*)calloc( M, sizeof(double) );
-  }
 
   // Initialize the vector which stores the sum of all points a rank is responsible
-  // for in each cluster
+  // for in each cluster as well as a vector which stores the local weighted mean
+  // of those points
   local_sums=(double**)malloc(sizeof(double*)*K);
+  local_means=(double**)malloc(sizeof(double*)*K);
   for( int clust_index=0; clust_index<K; clust_index++ ){
     local_sums[ clust_index ]=(double*)calloc( M, sizeof(double) );
+    local_means[clust_index]=(double*)calloc( M, sizeof(double) );
   }
-
-  // Initialize the cluster_counts vector which stores how many points are in
-  // each cluster
-  cluster_counts=(int*)calloc(K, sizeof(int));
 
   // Initialize the local_counts vector which stores how many points a rank is
   // responsible for are in each cluster
   local_counts=(int*)calloc(K, sizeof(int));
+
+  // Initialize the cluster_counts vector which stores how many points are in
+  // each cluster
+  global_counts=(int*)calloc(K, sizeof(int));
 
   // Initialize the cluster_drift vector which stores how far each cluster moved
   // during the current iteration
@@ -293,46 +289,52 @@ int main(int argc, char **argv) {
     moved_center = 0;
 
     // ----- Synchronization Phase -----
-    // Have ranks share their local counts and sums to determine the total counts
-    // and sums for all clusters
-    MPI_Allreduce( local_counts, cluster_counts, K, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+    // Have ranks share the number of points assigned to each cluster
+    MPI_Allreduce( local_counts, global_counts, K, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+
+    // Have each rank calculate its local weighted mean
     for( int clust_index=0; clust_index<K; clust_index++ ) {
-      MPI_Allreduce( local_sums[ clust_index ], cluster_sums[ clust_index ], M, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-    }
-
-    // Calculate the mean of all points in each cluster
-    // If the mean is the same as the coordinates of the cluster's center,
-    // we're done. Otherwise, move the cluster's center to the mean and
-    // perform another iteration
-    for( int clust_index=0; clust_index<K; clust_index++ ) {
-
-      for( int dim_index=0; dim_index<M; dim_index++ ) {
-        // First, store the current (and potentially soon to be updated) value of
-        // the cluster's center for later comparison
-        temp_point[ dim_index ] = cluster_centers[ clust_index ][ dim_index ];
-
-        // Calculate the mean
-        mean = cluster_sums[ clust_index ][ dim_index ] / cluster_counts[ clust_index ];
-
-        // If the mean is sufficiently different from the current center,
-        // update the center, and mark that we moved a center
-        if( fabs( mean - cluster_centers[ clust_index ][ dim_index ] ) > 0.00001 ) {
-              moved_center = 1;
-              cluster_centers[ clust_index ][ dim_index ] = mean;
-            }
+      // If a centroid is empty, just set it to the origin
+      if( global_counts[ clust_index ] == 0 ) {
+        for( int dim_index=0; dim_index<M; dim_index++ ) {
+          local_means[ clust_index ][ dim_index ] = 0;
+        }
+      } else {
+        for( int dim_index=0; dim_index<M; dim_index++ ) {
+          local_means[ clust_index ][ dim_index ] =
+          local_sums[ clust_index ][ dim_index ] / global_counts[ clust_index ];
+        }
       }
 
-      // Compare the new cluster center to the old cluster center to determine
-      // the drift
-      cluster_drift[ clust_index ] = euclidianDistance( temp_point, cluster_centers[ clust_index ], M );
-
     }
 
+    // Sum all the local means and store them on all ranks to obtain the new
+    // set of cluster centers
+    for( int clust_index=0; clust_index<K; clust_index++ ) {
+      // First, store the current (and potentially soon to be updated) value of
+      // the cluster's center for later comparison
+      for( int dim_index=0; dim_index<M; dim_index++ ) {
+        temp_point[ dim_index ] = cluster_centers[ clust_index ][ dim_index ];
+      }
+      // Sum all rank's local weighted means to obtain the new cluster centers
+      MPI_Allreduce( local_means[ clust_index ], cluster_centers[ clust_index ],
+                     M, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+
+     // Compare the new cluster center to the old cluster center to determine
+     // the drift
+     cluster_drift[ clust_index ] = euclidianDistance( temp_point, cluster_centers[ clust_index ], M );
+
+     // If the center was moved a sufficient distance, mark that we moved the center
+     if( cluster_drift[ clust_index ] > 0.00001 ) {
+       moved_center = 1;
+     }
+   }
+
+    // Determine the highest drift for each cluster group
     for( int group_index=0; group_index<T; group_index++ ) {
       group_drift[ group_index ] = -1;
     }
 
-    // Determine the highest drift for each cluster group
     for( int clust_index=0; clust_index<K; clust_index++ ) {
       if( cluster_drift[ clust_index ] > group_drift[ cluster_groups[ clust_index ] ] ) {
         group_drift[ cluster_groups[ clust_index ] ] = cluster_drift[ clust_index ];
@@ -500,17 +502,15 @@ int main(int argc, char **argv) {
   }
   free( lower_bounds );
 
-  free( cluster_counts );
-  for( int index=0; index<K; index++ ) {
-    free( cluster_sums[ index ] );
-  }
-  free( cluster_sums );
 
+  free( global_counts );
   free( local_counts );
   for( int index=0; index<K; index++ ) {
     free( local_sums[ index ] );
+    free( local_means[ index ] );
   }
   free( local_sums );
+  free( local_means );
 
   free( cluster_drift );
   free( group_drift );

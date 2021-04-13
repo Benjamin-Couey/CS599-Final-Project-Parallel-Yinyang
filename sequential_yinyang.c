@@ -227,21 +227,18 @@ int main(int argc, char **argv) {
         // the cluster's center for later comparison
         temp_point[ dim_index ] = cluster_centers[ clust_index ][ dim_index ];
 
-        // Calculate the mean
-        mean = cluster_sums[ clust_index ][ dim_index ] / cluster_counts[ clust_index ];
-
-        // If the mean is sufficiently different from the current center,
-        // update the center, and mark that we moved a center
-        if( fabs( mean - cluster_centers[ clust_index ][ dim_index ] ) > 0.00001 ) {
-              moved_center = 1;
-              cluster_centers[ clust_index ][ dim_index ] = mean;
-            }
+        // Update the center to be the mean of the points assigned to it
+        cluster_centers[ clust_index ][ dim_index ] = cluster_sums[ clust_index ][ dim_index ] / cluster_counts[ clust_index ];
       }
 
       // Compare the new cluster center to the old cluster center to determine
       // the drift
       cluster_drift[ clust_index ] = euclidianDistance( temp_point, cluster_centers[ clust_index ], M );
 
+      // If the center was moved a sufficient distance, mark that we moved the center
+      if( cluster_drift[ clust_index ] > 0.00001 ) {
+        moved_center = 1;
+      }
     }
 
     for( int group_index=0; group_index<T; group_index++ ) {
