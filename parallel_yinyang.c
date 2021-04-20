@@ -23,6 +23,14 @@
 // Testing with valgrind
 // valgrind --track-origins=yes ./parallel_yinyang 2 10 90 1 MSD_year_prediction_normalize_0_1_100k.txt 0
 
+//mpirun -np 2 -hostfile myhostfile.txt ./parallel_yinyang 10 10000 2 1 urbanGB.txt 2
+
+//mpirun -np 2 -hostfile myhostfile.txt ./parallel_yinyang 10 360177 2 1 urbanGB.txt 2
+
+//mpirun -np 2 -hostfile myhostfile.txt ./parallel_yinyang 10 10000 90 1 YearPredictionMSD.txt 2
+
+//mpirun -np 2 -hostfile myhostfile.txt ./parallel_yinyang 10 515345 90 1 YearPredictionMSD.txt 2
+
 //function prototypes
 int importDataset(char * fname, int N, int M, double ** dataset);
 double euclidianDistance( double * a, double * b, double dim );
@@ -422,7 +430,29 @@ int main(int argc, char **argv) {
   // Gather all the local clusterings into a full, global clustering
   int * global_clusters = (int*)malloc(sizeof(int)*N);
 
-  MPI_Gather( clusters, points_to_calc, MPI_INT, global_clusters, points_to_calc, MPI_INT, 0, MPI_COMM_WORLD );
+  // An array to store how many points each rank will be sending to rank 0
+  int * num_to_send = (int*)malloc(sizeof(int)*nprocs);
+
+  // An array to store the displacement of the data rank 0 will receive
+  int * displacement = (int*)malloc(sizeof(int)*nprocs);
+
+  // Tell the rank that owns this bucket how many values to expect from each other rank
+  MPI_Gather( &points_to_calc, 1, MPI_INT, num_to_send, 1, MPI_INT, 0, MPI_COMM_WORLD );
+
+  // Rank 0 calculate the displacement of the data it is receiving based on how
+  // many values it is receiving
+  if( my_rank == 0 ) {
+    for ( int index=0; index<nprocs; index++) {
+      displacement[ index ] = (index > 0) ? ( displacement[ index-1 ] + num_to_send[ index-1 ] ) : 0;
+    }
+  }
+
+  // Gather all the values in all the ranks' sendBuffers in the rank that owns
+  // this bucket
+  MPI_Gatherv( clusters, points_to_calc, MPI_INT, global_clusters, num_to_send, displacement, MPI_INT, 0, MPI_COMM_WORLD );
+
+  free( num_to_send );
+  free( displacement );
 
   // Determine the longest time it took a rank to finish
   end = MPI_Wtime() - start;
