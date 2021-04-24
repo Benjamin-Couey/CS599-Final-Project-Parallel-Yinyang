@@ -35,7 +35,8 @@
 int importDataset(char * fname, int N, int M, double * dataset);
 double euclidianDistance( double * a, double * b, double dim );
 double euclidianDistanceLocal( double * local_data, int local_start, double * b, double dim );
-void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * clusters );
+double euclidianDistanceOneD( double * a, int a_start, double * b, int b_start, double dim );
+void kmeans( double * dataset, int K, int N, int M, int max_iter, int * clusters );
 
 #define SEED 72
 
@@ -195,24 +196,26 @@ int main(int argc, char **argv) {
 
   // Initialize the clustering centers, using K random points from the full dataset
   // as the initial centers
-  double ** cluster_centers;
+  // The clusters
+  double * cluster_centers;
 
   srand( SEED );
-  int point_to_use;
-  cluster_centers=(double**)malloc(sizeof(double*)*K);
-  for( int point_index=0; point_index<K; point_index++ ) {
-    point_to_use = rand()%N;
-    cluster_centers[point_index]=(double*)malloc(sizeof(double)*M);
-    // Have rank 0 pick a point from the full dataset
-    if( my_rank==0 ) {
+  int local_start;
+  cluster_centers=(double*)malloc(sizeof(double*)*(K*M));
+  if( my_rank==0 ) {
+    int point_to_use;
+    for( int point_index=0; point_index<K; point_index++ ) {
+      point_to_use = rand()%N;
+      local_start = point_index * M;
+      // Have rank 0 pick a point from the full dataset
       for( int dim_index=0; dim_index<M; dim_index++ ) {
-        cluster_centers[point_index][dim_index] = dataset[point_to_use*M + dim_index];
+        cluster_centers[ local_start + dim_index ] = dataset[point_to_use*M + dim_index];
       }
     }
-    // Then broadcast the randomly chosen center to all ranks
-    MPI_Bcast( cluster_centers[point_index], M, MPI_DOUBLE, 0, MPI_COMM_WORLD );
   }
-  int local_start;
+  // Then broadcast the randomly chosen centers to all ranks
+  MPI_Bcast( cluster_centers, M*K, MPI_DOUBLE, 0, MPI_COMM_WORLD );
+
   // Free the full dataset to save on memory
   if( my_rank==0 ) {
     free( dataset );
@@ -243,7 +246,7 @@ int main(int argc, char **argv) {
   kmeans( cluster_centers, T, K, M, 5, cluster_groups );
 
   // Initialize the cluster vector which stores the index of the clustering
-  // center each point is associated with, onyl for the points the rank is responsible for
+  // center each point is associated with, only for the points the rank is responsible for
   clusters=(int*)malloc(sizeof(int)*points_to_calc);
 
   // Initialize the vector which stores the sum of all points a rank is responsible
@@ -303,7 +306,7 @@ int main(int argc, char **argv) {
     min_distance = -1;
     local_start = point_index * M;
     for( int clust_index=0; clust_index<K; clust_index++ ) {
-      distance = euclidianDistanceLocal( local_data, local_start, cluster_centers[ clust_index ], M );
+      distance = euclidianDistanceOneD( local_data, local_start, cluster_centers, clust_index*M, M );
       if( distance < min_distance || min_distance == -1 ){
         nearest_center = clust_index;
         min_distance = distance;
@@ -369,15 +372,15 @@ int main(int argc, char **argv) {
       // First, store the current (and potentially soon to be updated) value of
       // the cluster's center for later comparison
       for( int dim_index=0; dim_index<M; dim_index++ ) {
-        temp_point[ dim_index ] = cluster_centers[ clust_index ][ dim_index ];
+        temp_point[ dim_index ] = cluster_centers[ clust_index*M + dim_index ];
       }
       // Sum all rank's local weighted means to obtain the new cluster centers
-      MPI_Allreduce( local_means[ clust_index ], cluster_centers[ clust_index ],
+      MPI_Allreduce( local_means[ clust_index ], cluster_centers+(clust_index*M),
                      M, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
 
      // Compare the new cluster center to the old cluster center to determine
      // the drift
-     cluster_drift[ clust_index ] = euclidianDistance( temp_point, cluster_centers[ clust_index ], M );
+     cluster_drift[ clust_index ] = euclidianDistanceOneD( temp_point, 0, cluster_centers, clust_index*M, M );
 
      // If the center was moved a sufficient distance, mark that we moved the center
      if( cluster_drift[ clust_index ] > 0.00001 ) {
@@ -453,7 +456,7 @@ int main(int argc, char **argv) {
           // If a cluster belongs to a group for which the group lower bound is
           // less than the upper bound, we have to perform the distance calculation
           if( lower_bounds[ point_index ][ cluster_groups[ clust_index ] ] < upper_bounds[ point_index ] ) {
-            distance = euclidianDistanceLocal( local_data, local_start, cluster_centers[ clust_index ], M );
+            distance = euclidianDistanceOneD( local_data, local_start, cluster_centers, clust_index*M, M );
 
             if( distance < min_distance || min_distance == -1 ) {
               min_distance = distance;
@@ -532,9 +535,9 @@ int main(int argc, char **argv) {
       for( int clust_index=0; clust_index<K; clust_index++ ) {
         for( int dim_index=0; dim_index<M; dim_index++ ) {
           if( dim_index<(M-1) ) {
-            fprintf(file, "%f, ", cluster_centers[ clust_index ][ dim_index ] );
+            fprintf(file, "%f, ", cluster_centers[ clust_index*M + dim_index ] );
           } else {
-            fprintf(file, "%f\n", cluster_centers[ clust_index ][ dim_index ] );
+            fprintf(file, "%f\n", cluster_centers[ clust_index*M + dim_index ] );
           }
         }
       }
@@ -561,9 +564,6 @@ int main(int argc, char **argv) {
 
   free( local_data );
 
-  for( int index=0; index<K; index++ ) {
-    free( cluster_centers[ index ] );
-  }
   free( cluster_centers );
   free( clusters );
 
@@ -661,6 +661,13 @@ double euclidianDistanceLocal( double * local_data, int local_start, double * b,
   return sqrt( sum );
 }
 
+double euclidianDistanceOneD( double * a, int a_start, double * b, int b_start, double dim ) {
+  double sum = 0;
+  for( int index=0; index<dim; index++ ) {
+    sum += pow( ( a[a_start + index] - b[b_start + index] ), 2 );
+  }
+  return sqrt( sum );
+}
 
 
 /*
@@ -676,7 +683,7 @@ double euclidianDistanceLocal( double * local_data, int local_start, double * b,
   returns - modfies clusters so that the data point at index i is assigned to
             cluster clusters[i]
 */
-void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * clusters ) {
+void kmeans( double * dataset, int K, int N, int M, int max_iter, int * clusters ) {
   // Begin the sequential kmeans algorithm
   double ** cluster_centers;
   double ** cluster_sums;
@@ -691,7 +698,7 @@ void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * cluster
     point_to_use = rand()%N;
     cluster_centers[point_index]=(double*)malloc(sizeof(double)*M);
     for( int dim_index=0; dim_index<M; dim_index++ ) {
-      cluster_centers[point_index][dim_index] = dataset[point_to_use][dim_index];
+      cluster_centers[point_index][dim_index] = dataset[point_to_use*M + dim_index];
     }
   }
 
@@ -730,7 +737,7 @@ void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * cluster
       // Find the closest clustering center to the point
       min_distance = -1;
       for( int cent_index=0; cent_index<K; cent_index++ ) {
-        distance = euclidianDistance( dataset[ row_index ], cluster_centers[ cent_index ], M );
+        distance = euclidianDistanceLocal( dataset, row_index*M, cluster_centers[ cent_index ], M );
         if( distance < min_distance || min_distance == -1 ){
           nearest_center = cent_index;
           min_distance = distance;
@@ -742,7 +749,7 @@ void kmeans( double ** dataset, int K, int N, int M, int max_iter, int * cluster
       cluster_counts[ nearest_center ] = cluster_counts[ nearest_center ] + 1;
       for( int dim_index=0; dim_index<M; dim_index++ ) {
         cluster_sums[ nearest_center ][ dim_index ] =
-          cluster_sums[ nearest_center ][ dim_index ] + dataset[ row_index ][ dim_index ];
+          cluster_sums[ nearest_center ][ dim_index ] + dataset[ row_index*M + dim_index ];
       }
 
     }
